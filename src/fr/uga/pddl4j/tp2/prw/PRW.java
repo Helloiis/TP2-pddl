@@ -8,7 +8,6 @@ import fr.uga.pddl4j.plan.SequentialPlan;
 import fr.uga.pddl4j.planners.AbstractPlanner;
 import fr.uga.pddl4j.planners.ProblemNotSupportedException;
 import fr.uga.pddl4j.problem.DefaultProblem;
-import fr.uga.pddl4j.problem.Goal;
 import fr.uga.pddl4j.problem.Problem;
 import fr.uga.pddl4j.problem.State;
 import fr.uga.pddl4j.problem.operator.Effect;
@@ -45,6 +44,35 @@ public class PRW extends AbstractPlanner {
      */
     private static final Logger LOGGER = LogManager.getLogger(PRW.class.getName());
 
+        /**
+     * The HEURISTIC property used for planner configuration.
+     */
+    public static final String HEURISTIC_SETTING = "HEURISTIC";
+
+    /**
+     * The default value of the HEURISTIC property used for planner configuration.
+     */
+    public static final StateHeuristic.Name DEFAULT_HEURISTIC = StateHeuristic.Name.FAST_FORWARD;
+
+    /**
+     * The WEIGHT_HEURISTIC property used for planner configuration.
+     */
+    public static final String WEIGHT_HEURISTIC_SETTING = "WEIGHT_HEURISTIC";
+
+    /**
+     * The default value of the WEIGHT_HEURISTIC property used for planner configuration.
+     */
+    public static final double DEFAULT_WEIGHT_HEURISTIC = 1.0;
+
+    /**
+     * The weight of the heuristic.
+     */
+    private double heuristicWeight;
+
+    /**
+     * The name of the heuristic used by the planner.
+     */
+    private StateHeuristic.Name heuristic;
     /**
      * Maximum number of steps before restarting the search.
      */
@@ -64,6 +92,31 @@ public class PRW extends AbstractPlanner {
         pb.instantiate();
         return pb;
     }
+
+    @CommandLine.Option(names = {"-e", "--heuristic"}, defaultValue = "FAST_FORWARD",
+    description = "Set the heuristic : AJUSTED_SUM, AJUSTED_SUM2, AJUSTED_SUM2M, COMBO, "
+        + "MAX, FAST_FORWARD SET_LEVEL, SUM, SUM_MUTEX (preset: FAST_FORWARD)")
+    public void setHeuristic(StateHeuristic.Name heuristic) {
+        this.heuristic = heuristic;
+    }
+
+    /**
+     * Returns the name of the heuristic used by the planner to solve a planning problem.
+     *
+     * @return the name of the heuristic used by the planner to solve a planning problem.
+     */
+    public final StateHeuristic.Name getHeuristic() {
+        return this.heuristic;
+    }
+
+    /**
+     * Returns the weight of the heuristic.
+     *
+     * @return the weight of the heuristic.
+     */
+    public final double getHeuristicWeight() {
+        return this.heuristicWeight;
+    }
     /**
      * Search a solution plan to a specified domain and problem using Monte Carlo random search.
      *
@@ -72,11 +125,12 @@ public class PRW extends AbstractPlanner {
           * @throws ProblemNotSupportedException 
           */
          @Override
-         public Plan solve(Problem problem) throws ProblemNotSupportedException {
+        public Plan solve(Problem problem) throws ProblemNotSupportedException {
         if (!this.isSupported(problem)) {
             throw new ProblemNotSupportedException("Problem not supported");
         }
 
+        final StateHeuristic heuristic = StateHeuristic.getInstance(this.getHeuristic(), problem);
         final State initialState = new State(problem.getInitialState());
         final Condition goal = problem. getGoal();
         final Plan plan = new SequentialPlan();
@@ -87,7 +141,7 @@ public class PRW extends AbstractPlanner {
         int counter = 0;
 
         while (!s.satisfy(goal)) {
-                    if (counter > MAX_STEPS) { //ajout de deadEnd, pour qualifier un état d'impasse ?
+                    if (counter > MAX_STEPS || isDeadEnd(s, problem)) { //ajout de deadEnd, pour qualifier un état d'impasse ?
                         // Restart from the initial state
                         s = initialState;
                         counter = 0;
@@ -97,7 +151,7 @@ public class PRW extends AbstractPlanner {
                         s = monteCarloRandomWalk(s, plan, goal, problem);
         
                         // Update heuristic and counter
-                        int h = heuristic(s, goal); //heuristique à définir
+                        int h = heuristic.estimate(s, goal); //heuristique à définir
                         if (h < hmin) {
                             hmin = h;
                             counter = 0;
@@ -111,31 +165,15 @@ public class PRW extends AbstractPlanner {
                 return plan;
             }
         
-            /**
-             * Heuristic function to estimate the distance to the goal.
-             *
-             * @param s the current state.
-             * @param goal the goal to reach.
-             * @return an integer representing the heuristic value.
-             */
-
-             //heuristique à définir, comment peut-on quantifier la distance au goal depuis un état donné ?
-            private int heuristic(State s, Condition goal) {
-                //TODO
-                return heuristicValue;
+            public boolean isDeadEnd(State state, Problem problem) {
+                List<Action> actions = problem.getActions();
+            
+                boolean hasApplicableAction = actions.stream()
+                    .anyMatch(action -> state.satisfy(action.getPrecondition()));
+            
+                return !hasApplicableAction;
             }
-                
-        
-            /**
-             * Check if a given state is a dead end.
-             *
-             * @param s the state to check.
-             * @return true if the state is a dead end, false otherwise.
-             *
-            private boolean isDeadEnd(State s) {
-                return s.isDeadEnd();
-            }
-            */
+            
         
             /**
              * Perform a Monte Carlo random walk from the current state.
